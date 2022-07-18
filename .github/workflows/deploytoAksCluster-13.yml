@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: myacr2025.azurecr.io
+        username: ${{ secrets.acr_myacr2025_username }}
+        password: ${{ secrets.acr_myacr2025_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/result" -f  "result/Dockerfile" -t myacr2025.azurecr.io/myask:${{ github.sha }} --label dockerfile-path=result/Dockerfile
+        docker push myacr2025.azurecr.io/myask:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_myask_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep myaskabf1-vote-app | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace myaskabf1-vote-app`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: myaskabf1-vote-app
+        container-registry-url: myacr2025.azurecr.io
+        container-registry-username: ${{ secrets.acr_myacr2025_username }}
+        container-registry-password: ${{ secrets.acr_myacr2025_password }}
+        secret-name: myaskdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: myaskabf1-vote-app
+        manifests: |
+          manifests/deployment-13.yml
+          manifests/service-13.yml
+        images: |
+          myacr2025.azurecr.io/myask:${{ github.sha }}
+        imagepullsecrets: |
+          myaskdockerauth
