@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n myacr202210 -g myacr202210b5a2-rg --location "East US" --sku Standard --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n myacr202210 --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n myacr202210 --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n myacr202210 --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: myacr202210.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/result" -f  "result/Dockerfile" -t myacr202210.azurecr.io/myaks:${{ github.sha }} --label dockerfile-path=result/Dockerfile
+        docker push myacr202210.azurecr.io/myaks:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_myaks_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep myaksa8b3-votingapp | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace myaksa8b3-votingapp`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: myaksa8b3-votingapp
+        container-registry-url: myacr202210.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: myaksdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: myaksa8b3-votingapp
+        manifests: |
+          manifests/deployment-16.yml
+          manifests/service-16.yml
+        images: |
+          myacr202210.azurecr.io/myaks:${{ github.sha }}
+        imagepullsecrets: |
+          myaksdockerauth   
