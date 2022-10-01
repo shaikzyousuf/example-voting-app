@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: "myaks-7bba"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "myaks-7bba"
+  template:
+    metadata:
+      labels:
+        app: "myaks-7bba"
+    spec:
+      containers:
+        - name: "myaks-7bba"
+          image: "myacr202210.azurecr.io/myaks"
+          ports:
+          - containerPort: 80
