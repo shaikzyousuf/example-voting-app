@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n wwwwssss -g wwwwssssbf54-rg --location "East US" --sku Standard --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n wwwwssss --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n wwwwssss --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n wwwwssss --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: wwwwssss.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/result" -f  "result/Dockerfile" -t wwwwssss.azurecr.io/myaks:${{ github.sha }} --label dockerfile-path=result/Dockerfile
+        docker push wwwwssss.azurecr.io/myaks:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_myaks_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep myaksae5c | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace myaksae5c`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: myaksae5c
+        container-registry-url: wwwwssss.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: myaksdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: myaksae5c
+        manifests: |
+          manifests/deployment-17.yml
+          manifests/service-17.yml
+        images: |
+          wwwwssss.azurecr.io/myaks:${{ github.sha }}
+        imagepullsecrets: |
+          myaksdockerauth   
